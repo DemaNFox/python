@@ -1,2 +1,9 @@
 py builder.py [dir]
 .bundleignore - файлы игнора
+  # Пример: 
+  # Игнорируемые файлы и папки
+    .git
+    node_modules
+    temp/
+    *.log
+    __pycache__
