@@ -1,0 +1,2 @@
+py builder.py [dir]
+.bundleignore - файлы игнора
