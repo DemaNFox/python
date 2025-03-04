@@ -10,6 +10,8 @@ def load_ignore_list(ignore_file):
                 line = line.strip()
                 if line and not line.startswith("#"):  # Игнорируем комментарии
                     ignore_list.add(line)
+    # Автоматически добавляем сам .bundleignore в список исключений
+    ignore_list.add(".bundleignore")
     return ignore_list
 
 def should_ignore(path, ignore_list):
@@ -48,7 +50,8 @@ def count_files(source_dir, ignore_list):
 
 def bundle_files(source_dir):
     """Собирает все файлы в указанной директории в один текстовый файл"""
-    ignore_list = load_ignore_list(os.path.join(source_dir, ".bundleignore"))
+    ignore_file = os.path.join(source_dir, ".bundleignore")
+    ignore_list = load_ignore_list(ignore_file)
 
     # Определяем путь для сохранения файла (в папке со скриптом)
     script_dir = os.path.dirname(os.path.abspath(__file__))
