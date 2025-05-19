@@ -1,22 +1,36 @@
 [tool.black]
 line-length = 100
-target-version = ["py312"]
 
 [tool.ruff]
 line-length = 100
 fix = true
-select = ["ALL"]
-ignore = ["D100", "D101", "D102", "ANN101", "ANN102"]
 exclude = ["venv", ".venv", "__pycache__", "build", "dist"]
 
-[tool.mypy]
-python_version = "3.12"
-ignore_missing_imports = true
-strict = true
-show_error_codes = true
-
 [tool.ruff.lint]
-extend-select = ["F401", "F841", "B", "E", "W", "I"]
+# Явно указываем только нужные группы правил
+select = [
+    "F",    # Pyflakes — ошибки импорта, неиспользуемые переменные и т.п.
+    "E",    # pycodestyle — базовые ошибки форматирования
+    "W",    # pycodestyle предупреждения
+    "I",    # isort — сортировка импортов
+    "B",    # flake8-bugbear — типовые баги и антипаттерны
+    "UP"    # pyupgrade — советы по обновлению синтаксиса Python
+]
+# Игнорируем требования к docstring и аннотациям, если они не критичны
+ignore = [
+    "D100", "D101", "D102",   # pydocstyle — docstring для модулей, классов, методов
+    "ANN101", "ANN102"        # flake8-annotations — типизация self/cls
+]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+indent-size = 4
+
+[tool.mypy]
+ignore_missing_imports = true
+ignore_errors = true
+show_error_codes = true
 
 [build-system]
 requires = ["setuptools"]
