@@ -14,3 +14,11 @@ repos:
     rev: v1.10.0
     hooks:
       - id: mypy
+      
+  - repo: local
+    hooks:
+      - id: vulture
+        name: vulture
+        entry: vulture .
+        language: system
+        types: [python]
