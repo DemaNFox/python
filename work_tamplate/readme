@@ -17,7 +17,7 @@ PYTHON PROJECT TEMPLATE (LINT)
 
 1. Установи зависимости:
 
-    pip install black ruff mypy pre-commit
+    pip install black ruff mypy pre-commit vulture
 
 2. (Опционально) Инициализируй git-репозиторий:
 
@@ -35,6 +35,7 @@ PYTHON PROJECT TEMPLATE (LINT)
     ruff check . --fix     # удалить неиспользуемые импорты и переменные
     black .                # форматирование
     mypy .                 # проверка типов и импортов
+    vulture .              # поиск мертвого кода
 
 --------------------
 СТРУКТУРА ФАЙЛОВ:
