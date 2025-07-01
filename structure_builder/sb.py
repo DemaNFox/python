@@ -29,7 +29,8 @@ def build_tree(root_path, ignore_list, prefix=""):
     for index, entry in enumerate(entries):
         path = os.path.join(root_path, entry)
         connector = "└── " if index == len(entries) - 1 else "├── "
-        tree_lines.append(prefix + connector + entry)
+        display_name = entry + " [DIR]" if os.path.isdir(path) else entry
+        tree_lines.append(prefix + connector + display_name)
         if os.path.isdir(path):
             extension = "    " if index == len(entries) - 1 else "│   "
             tree_lines.extend(build_tree(path, ignore_list, prefix + extension))
