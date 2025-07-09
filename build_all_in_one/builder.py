@@ -1,5 +1,6 @@
 import os
 from tqdm import tqdm
+import fnmatch
 
 def load_ignore_list(ignore_file):
     """Загружает список исключений из файла .bundleignore"""
@@ -14,12 +15,24 @@ def load_ignore_list(ignore_file):
     ignore_list.add(".bundleignore")
     return ignore_list
 
+def is_hidden(path):
+    """Проверяет, есть ли скрытые файлы или папки в пути"""
+    parts = os.path.normpath(path).split(os.sep)
+    return any(part.startswith('.') for part in parts)
+
 def should_ignore(path, ignore_list):
     """Проверяет, нужно ли игнорировать файл или папку"""
-    for ignore in ignore_list:
-        if ignore in path or path.endswith(ignore):
+    if is_hidden(path):
+        return True
+
+    relative_path = os.path.normpath(path)
+    base_name = os.path.basename(relative_path)
+
+    for pattern in ignore_list:
+        if fnmatch.fnmatch(relative_path, pattern) or fnmatch.fnmatch(base_name, pattern):
             return True
     return False
+
 
 def get_unique_filename(directory, base_name="build.txt"):
     """Генерирует уникальное имя для файла, если такой уже существует"""
@@ -69,9 +82,9 @@ def bundle_files(source_dir):
                     continue
 
                 # Делаем путь относительным к указанной папке
-                relative_path = os.path.relpath(file_path, source_dir)
+                relative_path = os.path.relpath(file_path, source_dir).replace(os.sep, "/")
 
-                bundle.write(f"\n\n=== НАЧАЛО ФАЙЛА: {relative_path} ===\n\n")
+                bundle.write(f"=== НАЧАЛО ФАЙЛА: {relative_path} ===\n")
                 
                 try:
                     with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -79,7 +92,7 @@ def bundle_files(source_dir):
                 except Exception as e:
                     bundle.write(f"\n[Ошибка чтения файла: {e}]\n")
 
-                bundle.write(f"\n\n=== КОНЕЦ ФАЙЛА: {relative_path} ===\n")
+                bundle.write(f"\n=== КОНЕЦ ФАЙЛА: {relative_path} ===\n")
                 pbar.update(1)
 
     print(f"\n✅ Файлы собраны в: {output_file}")
