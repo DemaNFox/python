@@ -71,8 +71,26 @@ def bundle_files(source_dir):
     output_file = get_unique_filename(script_dir)
 
     total_files = count_files(source_dir, ignore_list)
+    
+    # Сначала собираем список всех файлов, которые войдут в сборку
+    included_files = []
+    for root, dirs, files in os.walk(source_dir):
+        dirs[:] = [d for d in dirs if not should_ignore(os.path.join(root, d), ignore_list)]
+        for file in files:
+            file_path = os.path.join(root, file)
+            if not should_ignore(file_path, ignore_list):
+                relative_path = os.path.relpath(file_path, source_dir).replace(os.sep, "/")
+                included_files.append(relative_path)
 
     with open(output_file, "w", encoding="utf-8") as bundle, tqdm(total=total_files, desc="📦 Объединение файлов", unit="файл") as pbar:
+    
+        # Вставка заголовка со списком файлов
+        bundle.write("В проект вошли следующие файлы:\n")
+        for rel_path in included_files:
+            bundle.write(f"{rel_path}\n")
+        bundle.write("\n")
+        
+        
         for root, dirs, files in os.walk(source_dir):
             dirs[:] = [d for d in dirs if not should_ignore(os.path.join(root, d), ignore_list)]
             
