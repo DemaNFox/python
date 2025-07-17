@@ -1,126 +1,157 @@
+#!/usr/bin/env python3
+"""
+bundle.py – формирует текстовые дампы проекта, пригодные для ChatGPT.
+
+• Part 1 содержит индекс «PROJECT OVERVIEW».
+• Каждый файл начинается строкой «# FILE: <path>» и открывается тройным
+  бэктиком с языком: ```python, ```json, … .
+• Дамп делится на части, каждая ≈ TOKEN_LIMIT токенов (≈ CHAR_LIMIT симв.).
+• Если ОДИН файл превышает лимит, он режется на Chunk N/M – без обрезки кода.
+"""
+
+from __future__ import annotations
 import os
-from tqdm import tqdm
 import fnmatch
+import argparse
+from pathlib import Path
+from tqdm import tqdm
 
-def load_ignore_list(ignore_file):
-    """Загружает список исключений из файла .bundleignore"""
-    ignore_list = set()
-    if os.path.exists(ignore_file):
-        with open(ignore_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#"):  # Игнорируем комментарии
-                    ignore_list.add(line)
-    # Автоматически добавляем сам .bundleignore в список исключений
-    ignore_list.add(".bundleignore")
-    return ignore_list
+# ──────────────────────────── базовые настройки ────────────────────────────
+TOKEN_LIMIT      = 3_500
+CHARS_PER_TOKEN  = 4
+CHAR_LIMIT       = TOKEN_LIMIT * CHARS_PER_TOKEN     # ≈ 14 000 симв.
 
-def is_hidden(path):
-    """Проверяет, есть ли скрытые файлы или папки в пути"""
-    parts = os.path.normpath(path).split(os.sep)
-    return any(part.startswith('.') for part in parts)
+LANG_MAP = {  # расширение → язык для markdown‑подсветки
+    ".py": "python", ".json": "json", ".js": "javascript", ".ts": "typescript",
+    ".html": "html", ".css": "css", ".md": "markdown", ".ini": "ini",
+    ".toml": "toml", ".yml": "yaml", ".yaml": "yaml", ".sql": "sql",
+    ".txt": "text",
+}
 
-def should_ignore(path, ignore_list):
-    """Проверяет, нужно ли игнорировать файл или папку"""
-    if is_hidden(path):
+# ──────────────────────────── ignore helpers ────────────────────────────────
+def load_ignore(base: Path) -> set[str]:
+    ignore = {".bundleignore"}
+    f = base / ".bundleignore"
+    if f.exists():
+        for ln in f.read_text(encoding="utf-8").splitlines():
+            ln = ln.strip()
+            if ln and not ln.startswith("#"):
+                ignore.add(ln)
+    return ignore
+
+def hidden(p: Path) -> bool:
+    return any(seg.startswith(".") for seg in p.parts)
+
+def skip(p: Path, ignore: set[str]) -> bool:
+    if hidden(p):
         return True
+    s = str(p)
+    return any(fnmatch.fnmatch(s, pat) or fnmatch.fnmatch(p.name, pat) for pat in ignore)
 
-    relative_path = os.path.normpath(path)
-    base_name = os.path.basename(relative_path)
+# ──────────────────────────── сбор файлов ───────────────────────────────────
+def collect(src: Path, ignore: set[str]):
+    files = []
+    for root, dirs, fls in os.walk(src):
+        dirs[:] = [d for d in dirs if not skip(Path(root, d), ignore)]
+        for f in fls:
+            p = Path(root, f)
+            if not skip(p, ignore):
+                files.append(p)
+    return sorted(files)
 
-    for pattern in ignore_list:
-        if fnmatch.fnmatch(relative_path, pattern) or fnmatch.fnmatch(base_name, pattern):
-            return True
-    return False
+# ──────────────────────────── служебные функции ────────────────────────────
+def lang(p: Path) -> str:
+    return LANG_MAP.get(p.suffix.lower(), "")
 
+def unique(out_dir: Path, idx: int) -> Path:
+    return out_dir / f"build_{idx}.txt"
 
-def get_unique_filename(directory, base_name="build.txt"):
-    """Генерирует уникальное имя для файла, если такой уже существует"""
-    base_path = os.path.join(directory, base_name)
-    
-    if not os.path.exists(base_path):
-        return base_path  # Если файла нет, используем стандартное имя
+def write_index(fh, files, src):
+    fh.write("## PROJECT OVERVIEW\n")
+    for p in files:
+        fh.write(f"{p.relative_to(src).as_posix()}\n")
+    fh.write("\n")
 
-    # Генерируем build_1.txt, build_2.txt и т. д.
-    index = 1
-    while True:
-        new_filename = f"build_{index}.txt"
-        new_path = os.path.join(directory, new_filename)
-        if not os.path.exists(new_path):
-            return new_path
-        index += 1
+def split_code(raw: str, header_len: int, footer_len: int, limit: int):
+    """Разбивает код на куски так, чтобы <chunk> + header + footer ≤ limit."""
+    chunk_size = limit - header_len - footer_len
+    for i in range(0, len(raw), chunk_size):
+        yield raw[i : i + chunk_size]
 
-def count_files(source_dir, ignore_list):
-    """Подсчитывает количество файлов, которые будут обработаны (для прогресс-бара)"""
-    total_files = 0
-    for root, dirs, files in os.walk(source_dir):
-        dirs[:] = [d for d in dirs if not should_ignore(os.path.join(root, d), ignore_list)]
-        for file in files:
-            file_path = os.path.join(root, file)
-            if not should_ignore(file_path, ignore_list):
-                total_files += 1
-    return total_files
+def write_chunk(fh, rel: str, code: str, language: str,
+                idx: int | None = None, total: int | None = None):
+    hdr = f"# FILE: {rel}"
+    if idx is not None:
+        hdr += f" (chunk {idx}/{total})"
+    fh.write(hdr + "\n")
+    fh.write(f"```{language}\n{code}\n```\n\n")
 
-def bundle_files(source_dir):
-    """Собирает все файлы в указанной директории в один текстовый файл"""
-    ignore_file = os.path.join(source_dir, ".bundleignore")
-    ignore_list = load_ignore_list(ignore_file)
+# ──────────────────────────── основная логика ───────────────────────────────
+def bundle(src_dir: Path, char_limit: int = CHAR_LIMIT):
+    src_dir = src_dir.resolve()
+    ignore  = load_ignore(src_dir)
+    files   = collect(src_dir, ignore)
 
-    # Определяем путь для сохранения файла (в папке со скриптом)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_file = get_unique_filename(script_dir)
+    if not files:
+        print("❌ No files to bundle."); return
 
-    total_files = count_files(source_dir, ignore_list)
-    
-    # Сначала собираем список всех файлов, которые войдут в сборку
-    included_files = []
-    for root, dirs, files in os.walk(source_dir):
-        dirs[:] = [d for d in dirs if not should_ignore(os.path.join(root, d), ignore_list)]
-        for file in files:
-            file_path = os.path.join(root, file)
-            if not should_ignore(file_path, ignore_list):
-                relative_path = os.path.relpath(file_path, source_dir).replace(os.sep, "/")
-                included_files.append(relative_path)
+    out_dir = Path(__file__).resolve().parent
+    part_idx = 1
+    fh = unique(out_dir, part_idx).open("w", encoding="utf-8")
+    write_index(fh, files, src_dir)
+    cur_size = fh.tell()
 
-    with open(output_file, "w", encoding="utf-8") as bundle, tqdm(total=total_files, desc="📦 Объединение файлов", unit="файл") as pbar:
-    
-        # Вставка заголовка со списком файлов
-        bundle.write("В проект вошли следующие файлы:\n")
-        for rel_path in included_files:
-            bundle.write(f"{rel_path}\n")
-        bundle.write("\n")
-        
-        
-        for root, dirs, files in os.walk(source_dir):
-            dirs[:] = [d for d in dirs if not should_ignore(os.path.join(root, d), ignore_list)]
-            
-            for file in files:
-                file_path = os.path.join(root, file)
-                if should_ignore(file_path, ignore_list):
-                    continue
+    with tqdm(total=len(files), desc="📦 Bundling", unit="file") as bar:
+        for p in files:
+            rel = p.relative_to(src_dir).as_posix()
+            code = p.read_text(encoding="utf-8", errors="ignore")
+            language = lang(p)
+            footer_len = len("```\n\n")
 
-                # Делаем путь относительным к указанной папке
-                relative_path = os.path.relpath(file_path, source_dir).replace(os.sep, "/")
+            # длинный файл: делим на чанки
+            head_template = f"# FILE: {rel} (chunk X/Y)\n```{language}\n"
+            head_len = len(head_template.replace("X", "1").replace("Y", "1"))
 
-                bundle.write(f"=== НАЧАЛО ФАЙЛА: {relative_path} ===\n")
-                
-                try:
-                    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                        bundle.write(f.read())
-                except Exception as e:
-                    bundle.write(f"\n[Ошибка чтения файла: {e}]\n")
+            if len(code) + len(f"# FILE: {rel}\n```{language}\n") + footer_len > char_limit:
+                chunks = list(split_code(code, head_len, footer_len, char_limit))
+                total  = len(chunks)
+                for idx, chunk in enumerate(chunks, 1):
+                    header_len = len(
+                        f"# FILE: {rel} (chunk {idx}/{total})\n```{language}\n"
+                    )
+                    if cur_size + len(chunk) + header_len + footer_len > char_limit and cur_size:
+                        fh.close()
+                        part_idx += 1
+                        fh = unique(out_dir, part_idx).open("w", encoding="utf-8")
+                        cur_size = 0
+                    write_chunk(fh, rel, chunk, language, idx, total)
+                    cur_size = fh.tell()
+            else:
+                header_len = len(f"# FILE: {rel}\n```{language}\n")
+                if cur_size + len(code) + header_len + footer_len > char_limit and cur_size:
+                    fh.close()
+                    part_idx += 1
+                    fh = unique(out_dir, part_idx).open("w", encoding="utf-8")
+                    cur_size = 0
+                write_chunk(fh, rel, code, language)
+                cur_size = fh.tell()
 
-                bundle.write(f"\n=== КОНЕЦ ФАЙЛА: {relative_path} ===\n")
-                pbar.update(1)
+            bar.update(1)
 
-    print(f"\n✅ Файлы собраны в: {output_file}")
+    fh.close()
+    print(f"✅ Bundled into {part_idx} file(s) in {out_dir}")
+
+# ──────────────────────────── CLI ───────────────────────────────────────────
+def main():
+    ap = argparse.ArgumentParser(description="Bundle project for ChatGPT.")
+    ap.add_argument("source_dir", help="Project directory")
+    ap.add_argument("--token-limit", type=int, default=TOKEN_LIMIT,
+                    help="Max tokens per part (default 3500).")
+    args = ap.parse_args()
+
+    global CHAR_LIMIT
+    CHAR_LIMIT = args.token_limit * CHARS_PER_TOKEN
+    bundle(Path(args.source_dir), CHAR_LIMIT)
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Собирает все файлы в папке в один текстовый файл.")
-    parser.add_argument("source_dir", help="Папка, из которой собираем файлы")
-
-    args = parser.parse_args()
-    
-    bundle_files(args.source_dir)
+    main()
